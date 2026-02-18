@@ -1,3 +1,14 @@
+# Installation
+
+First, uninstall the codelldb extension if it was installed.
+
+Then download [codelldb-full.vsix](https://github.com/mactul/codelldb-enhanced/releases) and run:
+```
+code --install-extension codelldb-full.vsix
+```
+
+For the extension to work perfectly, you need to have a compile_commands.json either in your project, either in the .vscode folder or in the root folder.
+
 # Features
 - Conditional breakpoints, function breakpoints, logpoints,
 - Hardware data access breakpoints (watchpoints),
