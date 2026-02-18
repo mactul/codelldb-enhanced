@@ -101,6 +101,7 @@ add_subdirectory(adapter)
 add_subdirectory(lang_support)
 add_subdirectory(extension)
 add_subdirectory(tests)
+add_subdirectory(libclang_expr)
 
 add_dependencies(adapter lldb lang_support)
 
@@ -166,7 +167,7 @@ add_copy_file(PackageFiles ${CMAKE_CURRENT_SOURCE_DIR}/syntaxes/disassembly.json
 # For extension debugging
 
 add_custom_target(dev_debugging
-    DEPENDS adapter debuggee extension ${PackageFiles}
+    DEPENDS adapter debuggee extension libclang-expr ${PackageFiles}
 )
 
 # VSIX packages
@@ -184,6 +185,7 @@ set(PackagedFilesFull
     platform.ok
     bin/codelldb-launch
     bin/codelldb-launch.exe
+    libclang_expr/libclang-expr
     adapter/codelldb
     adapter/codelldb.exe
     adapter/*.so
@@ -226,7 +228,7 @@ add_custom_target(vsix_bootstrap
 )
 
 add_custom_target(vsix_full
-    DEPENDS extension lldb adapter ${PackageFiles}
+    DEPENDS extension lldb adapter libclang-expr ${PackageFiles}
     COMMAND ${UpdateFile} ${CMAKE_CURRENT_BINARY_DIR}/vscodeignore-full ${CMAKE_CURRENT_BINARY_DIR}/.vscodeignore
     COMMAND echo Y | ${NPM} run vsce -- package ${VsceOptions} --target ${PLATFORM_ID} -o ${CMAKE_CURRENT_BINARY_DIR}/codelldb-full.vsix
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}

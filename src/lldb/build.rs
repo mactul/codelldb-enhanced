@@ -9,6 +9,8 @@ fn main() {
 
     let mut build_config = cpp_build::Config::new();
 
+    build_config.flag("-Wno-invalid-specialization");
+
     for dir in env::var("LLDB_INCLUDE").unwrap().split(';') {
         build_config.include(dir);
     }

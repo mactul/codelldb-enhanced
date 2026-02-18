@@ -1,5 +1,5 @@
 import {
-    workspace, window, commands, debug, extensions, languages, lm,
+    workspace, window, commands, debug, extensions, languages, Hover, MarkdownString, lm,
     ExtensionContext, WorkspaceConfiguration, WorkspaceFolder, CancellationToken, ConfigurationScope,
     DebugConfiguration, DebugAdapterDescriptorFactory, DebugSession, DebugAdapterExecutable,
     DebugAdapterDescriptor, Uri, ConfigurationTarget, DebugAdapterInlineImplementation, DebugConfigurationProviderTriggerKind,
@@ -29,6 +29,72 @@ import { LaunchCompletionProvider } from './launchCompletions';
 import { output, showErrorWithLog } from './logging';
 import { LLDBCommandTool, SessionInfoTool } from './vibeDebug';
 import { alternateBackend, selfTest, commandPrompt } from './adapterUtils';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+
+const execFileAsync = promisify(execFile);
+
+async function queryLibclangServer(binaryPath: string, filename: string, line: number, column: number): Promise<string | null> {
+    try
+    {
+        const { stdout } = await execFileAsync(binaryPath, [filename, String(line), String(column)]);
+        const result = stdout.trim();
+        return result.length > 0 ? result : null;
+    }
+    catch (e)
+    {
+        return null;
+    }
+}
+
+async function fullyExpandVariable(
+    session: DebugSession,
+    variablesReference: number,
+    depth: number = 0,
+    maxDepth: number = 3
+): Promise<string> {
+    if (depth >= maxDepth) return '...';
+    if (variablesReference === 0) return '';
+
+    try {
+        const vars = await session.customRequest('variables', {
+            variablesReference: variablesReference
+        });
+
+        if (!vars.variables || vars.variables.length === 0) {
+            return '';
+        }
+
+        const indent = '  '.repeat(depth);
+        const parts: string[] = [];
+
+        for (const v of vars.variables) {
+            let value = v.value;
+
+            // If value is already a quoted string, don't expand children
+            const looksLikeString = /^".*"$/.test(value);
+
+            if (v.variablesReference && v.variablesReference !== 0 && !looksLikeString) {
+                const expanded = await fullyExpandVariable(
+                    session,
+                    v.variablesReference,
+                    depth + 1,
+                    maxDepth
+                );
+                if (expanded) {
+                    value = expanded;
+                }
+            }
+
+            parts.push(`${indent}  ${v.name}: ${value}`);
+        }
+
+        return `{\n${parts.join(',\n')}\n${indent}}`;
+    } catch (e) {
+        return '...';
+    }
+}
 
 export function getExtensionConfig(scope?: ConfigurationScope, subkey?: string): WorkspaceConfiguration {
     let key = 'lldb';
@@ -86,6 +152,71 @@ class Extension implements DebugAdapterDescriptorFactory {
         subscriptions.push(commands.registerCommand('lldb.alternateBackend', () => alternateBackend(this.context.extensionPath)));
         subscriptions.push(commands.registerCommand('lldb.selfTest', () => this.runSelfTest()));
         subscriptions.push(commands.registerCommand('lldb.commandPrompt', () => commandPrompt(this.context.extensionPath)));
+
+        const libclang_expr_binary_path = path.join(context.extensionPath, 'libclang_expr', 'libclang-expr');
+
+        for (const lang of ['c', 'cpp'])
+        {
+            subscriptions.push(languages.registerHoverProvider(
+                { scheme: 'file', language: lang },
+                {
+                    async provideHover(document, position, token) {
+                        const session = debug.activeDebugSession;
+                        if (!session) return null;
+
+                        const line = document.lineAt(position.line).text;
+                        // Slice to the character position in UTF-16, then get byte length of that slice
+                        const utf16Slice = line.slice(0, position.character);
+                        const byteColumn = Buffer.byteLength(utf16Slice, 'utf8') + 1; // +1 for 1-based
+
+                        const expression = await queryLibclangServer(
+                            libclang_expr_binary_path,
+                            document.fileName,
+                            position.line + 1,
+                            byteColumn  // your UTF-16 to byte conversion
+                        );
+
+                        if (!expression) return null;
+
+                        const splitted_expression = expression.split("\n")
+
+                        const threads = await session.customRequest('threads', {});
+                        const threadId = threads?.threads?.[0]?.id;
+                        const stackTrace = await session.customRequest('stackTrace', { threadId });
+                        const frameId = stackTrace?.stackFrames?.[0]?.id;
+
+                        try {
+                            const response = await session.customRequest('evaluate', {
+                                expression: splitted_expression[1],
+                                context: 'hover',
+                                frameId: frameId
+                            });
+
+                            let displayValue = response.result;
+
+                            const looksLikeString = /^".*"$/.test(displayValue);
+
+                            // If the result has children (it's a struct/array), expand it
+                            if (response.variablesReference && response.variablesReference !== 0 && !looksLikeString) {
+                                displayValue = await fullyExpandVariable(
+                                    session,
+                                    response.variablesReference,
+                                    0,
+                                    3  // expand up to 3 levels deep
+                                );
+                            }
+
+                            const markdown = new MarkdownString();
+                            markdown.appendCodeblock(`${splitted_expression[0]} = ${displayValue}`, 'c');
+
+                            return new Hover(markdown);
+                        } catch (e) {
+                            return null;
+                        }
+                    }
+                }
+            ));
+        }
 
         subscriptions.push(workspace.onDidChangeConfiguration(event => {
             if (event.affectsConfiguration('lldb.rpcServer')) {

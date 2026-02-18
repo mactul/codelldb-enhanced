@@ -1,13 +1,18 @@
 {
-	"name": "vscode-lldb",
-	"displayName": "CodeLLDB",
+	"name": "vscode-lldb-enhanced",
+	"displayName": "CodeLLDB Enhanced",
 	"version": "@VERSION@",
-	"publisher": "vadimcn",
-	"description": "Debugger for native code, powered by LLDB. Debug C++, Rust, and other compiled languages.",
+	"publisher": "mactul",
+	"description": "Forked from CodeLLDB but add support for more complex hover expressions",
 	"license": "MIT",
 	"author": {
 		"name": "vadimcn"
 	},
+	"contributors": [
+		{
+		"name": "mactul"
+		}
+	],
 	"icon": "images/lldb.png",
 	"categories": [
 		"Debuggers"
